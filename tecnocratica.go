@@ -1,0 +1,325 @@
+package tecnocratica
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/libdns/libdns"
+)
+
+// Provider implements DNS record manipulation with neodigit/virtualname.
+type Provider struct {
+	// The neodigit/virtualname api token.
+	APIToken string `json:"api_token,omitempty"`
+	APIURL   string `json:"api_url,omitempty"`
+}
+
+// getZoneID finds the zone ID for a given zone name.
+func (p *Provider) getZoneID(ctx context.Context, zone string) (int, error) {
+	client, err := newClient(p)
+	if err != nil {
+		return 0, err
+	}
+
+	zones, err := client.getZones(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Normalize the zone name (ensure it ends with a dot)
+	zoneName := strings.TrimSuffix(zone, ".")
+
+	for _, z := range zones {
+		if strings.TrimSuffix(z.Name, ".") == zoneName {
+			return z.ID, nil
+		}
+	}
+
+	return 0, fmt.Errorf("zone not found: %s", zone)
+}
+
+// libdnsToInternal converts a libdns.Record to an internal Record.
+func libdnsToInternal(zone string, rec libdns.Record) Record {
+	rr := rec.RR()
+
+	// Convert relative name to the format expected by the API
+	// The API expects names relative to the zone, or "@" for the zone apex
+	name := rr.Name
+
+	// Strip the zone suffix if present (FQDN to relative conversion)
+	zoneSuffix := "." + strings.TrimSuffix(zone, ".")
+	if strings.HasSuffix(name, zoneSuffix) {
+		name = strings.TrimSuffix(name, zoneSuffix)
+	} else if strings.HasSuffix(name, "."+strings.TrimSuffix(zone, ".")) {
+		name = strings.TrimSuffix(name, "."+strings.TrimSuffix(zone, "."))
+	}
+
+	// Handle apex records
+	if name == "" || name == "@" || name == zone || name == strings.TrimSuffix(zone, ".") {
+		name = "@"
+	}
+
+	// Parse priority from data field for MX and SRV records
+	priority := 0
+	data := rr.Data
+
+	// For TXT records, remove quotes if present (libdns adds them, but API doesn't store them)
+	if rr.Type == "TXT" {
+		data = strings.Trim(data, "\"")
+	}
+
+	if rr.Type == "MX" {
+		// MX format: "priority target"
+		parts := strings.Fields(rr.Data)
+		if len(parts) >= 2 {
+			fmt.Sscanf(parts[0], "%d", &priority)
+			data = strings.Join(parts[1:], " ")
+		}
+	} else if rr.Type == "SRV" {
+		// SRV format: "priority weight port target"
+		parts := strings.Fields(rr.Data)
+		if len(parts) >= 4 {
+			fmt.Sscanf(parts[0], "%d", &priority)
+			// Keep weight, port, and target in the content
+			data = strings.Join(parts[1:], " ")
+		}
+	}
+
+	return Record{
+		Name:     name,
+		Type:     rr.Type,
+		Content:  data,
+		TTL:      int(rr.TTL.Seconds()),
+		Priority: priority,
+	}
+}
+
+// internalToLibdns converts an internal Record to a libdns.Record.
+func internalToLibdns(rec Record) (libdns.Record, error) {
+	data := rec.Content
+
+	// For MX and SRV records, libdns expects the priority to be part of the Data field
+	// Format: "priority target" for MX, or "priority weight port target" for SRV
+	// The Neodigit API stores priority separately in the Priority field
+	if rec.Type == "MX" {
+		data = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
+	} else if rec.Type == "SRV" {
+		// SRV: API stores priority in Priority field, "weight port target" in Content
+		data = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
+	}
+
+	name := rec.Name
+
+	// Handle SRV records with empty names by using a placeholder
+	// The Neodigit API may return SRV records with empty names which are valid in their system
+	// but don't pass libdns strict SRV naming validation (_service._proto.name)
+	if rec.Type == "SRV" && (name == "" || name == "@") {
+		// Use a placeholder that satisfies libdns validation
+		// This preserves the record data while allowing it to pass validation
+		name = "_service._tcp"
+	}
+
+	rr := libdns.RR{
+		Name: name,
+		Type: rec.Type,
+		Data: data,
+		TTL:  time.Duration(rec.TTL) * time.Second,
+	}
+
+	// Parse the RR into a type-specific record
+	return rr.Parse()
+}
+
+// GetRecords lists all the records in the zone.
+func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
+	zoneID, err := p.getZoneID(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(p)
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := client.getRecords(ctx, zoneID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var libdnsRecords []libdns.Record
+	for _, record := range records {
+		libdnsRec, err := internalToLibdns(record)
+		if err != nil {
+			// Skip records that can't be parsed
+			// This allows the operation to continue even if some records are invalid
+			// In debug mode, you could log: record ID, type, name, and error
+			continue
+		}
+		libdnsRecords = append(libdnsRecords, libdnsRec)
+	}
+
+	return libdnsRecords, nil
+}
+
+// AppendRecords adds records to the zone. It returns the records that were added.
+func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	zoneID, err := p.getZoneID(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(p)
+	if err != nil {
+		return nil, err
+	}
+
+	var appendedRecords []libdns.Record
+	for _, record := range records {
+		internalRec := libdnsToInternal(zone, record)
+
+		createdRec, err := client.createRecord(ctx, zoneID, internalRec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create record: %w", err)
+		}
+
+		libdnsRec, err := internalToLibdns(*createdRec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert created record: %w", err)
+		}
+
+		appendedRecords = append(appendedRecords, libdnsRec)
+	}
+
+	return appendedRecords, nil
+}
+
+// SetRecords sets the records in the zone, either by updating existing records or creating new ones.
+// It returns the updated records.
+func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	zoneID, err := p.getZoneID(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(p)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all existing records
+	existingRecords, err := client.getRecords(ctx, zoneID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var setRecords []libdns.Record
+	for _, record := range records {
+		internalRec := libdnsToInternal(zone, record)
+
+		// Find and delete any existing records with the same name and type
+		for _, existing := range existingRecords {
+			if existing.Name == internalRec.Name && existing.Type == internalRec.Type {
+				err := client.deleteRecord(ctx, zoneID, existing.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to delete existing record %d: %w", existing.ID, err)
+				}
+			}
+		}
+
+		// Create the new record
+		createdRec, err := client.createRecord(ctx, zoneID, internalRec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create record: %w", err)
+		}
+
+		libdnsRec, err := internalToLibdns(*createdRec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert created record: %w", err)
+		}
+
+		setRecords = append(setRecords, libdnsRec)
+	}
+
+	return setRecords, nil
+}
+
+// DeleteRecords deletes the specified records from the zone. It returns the records that were deleted.
+func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	zoneID, err := p.getZoneID(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(p)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all existing records
+	existingRecords, err := client.getRecords(ctx, zoneID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var deletedRecords []libdns.Record
+	for _, record := range records {
+		internalRec := libdnsToInternal(zone, record)
+
+		// Find matching records by name, type, and content
+		found := false
+		for _, existing := range existingRecords {
+			if existing.Name == internalRec.Name &&
+				existing.Type == internalRec.Type &&
+				existing.Content == internalRec.Content {
+				err := client.deleteRecord(ctx, zoneID, existing.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to delete record %d: %w", existing.ID, err)
+				}
+
+				libdnsRec, err := internalToLibdns(existing)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert deleted record: %w", err)
+				}
+
+				deletedRecords = append(deletedRecords, libdnsRec)
+				found = true
+			}
+		}
+
+		if !found {
+			// Record not found - this could be because:
+			// 1. It doesn't exist
+			// 2. The content doesn't match exactly (e.g., whitespace differences)
+			// Try matching by name and type only as a fallback
+			for _, existing := range existingRecords {
+				if existing.Name == internalRec.Name && existing.Type == internalRec.Type {
+					err := client.deleteRecord(ctx, zoneID, existing.ID)
+					if err != nil {
+						return nil, fmt.Errorf("failed to delete record %d: %w", existing.ID, err)
+					}
+
+					libdnsRec, err := internalToLibdns(existing)
+					if err != nil {
+						return nil, fmt.Errorf("failed to convert deleted record: %w", err)
+					}
+
+					deletedRecords = append(deletedRecords, libdnsRec)
+					break
+				}
+			}
+		}
+	}
+
+	return deletedRecords, nil
+}
+
+// Interface guards
+var (
+	_ libdns.RecordGetter   = (*Provider)(nil)
+	_ libdns.RecordAppender = (*Provider)(nil)
+	_ libdns.RecordSetter   = (*Provider)(nil)
+	_ libdns.RecordDeleter  = (*Provider)(nil)
+)
