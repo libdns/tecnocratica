@@ -100,7 +100,8 @@ func libdnsToInternal(zone string, rec libdns.Record) Record {
 }
 
 // internalToLibdns converts an internal Record to a libdns.Record.
-func internalToLibdns(rec Record) (libdns.Record, error) {
+// The zone parameter is required to reconstruct absolute domain names from relative names.
+func internalToLibdns(zone string, rec Record) (libdns.Record, error) {
 	data := rec.Content
 
 	// For MX and SRV records, libdns expects the priority to be part of the Data field
@@ -122,6 +123,23 @@ func internalToLibdns(rec Record) (libdns.Record, error) {
 		// Use a placeholder that satisfies libdns validation
 		// This preserves the record data while allowing it to pass validation
 		name = "_service._tcp"
+	}
+
+	// Convert relative names to absolute (FQDN) by appending the zone
+	// The API returns relative names (e.g., "_acme-challenge.git" or "@")
+	// but libdns expects absolute names (e.g., "_acme-challenge.git.etaboada.com.")
+	if name != "" && name != "@" {
+		// Ensure zone has trailing dot
+		normalizedZone := strings.TrimSuffix(zone, ".")
+		// Build the FQDN: name.zone.
+		name = name + "." + normalizedZone + "."
+	} else {
+		// "@" represents the zone apex, so use the zone itself
+		if !strings.HasSuffix(zone, ".") {
+			name = zone + "."
+		} else {
+			name = zone
+		}
 	}
 
 	rr := libdns.RR{
@@ -154,7 +172,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 	var libdnsRecords []libdns.Record
 	for _, record := range records {
-		libdnsRec, err := internalToLibdns(record)
+		libdnsRec, err := internalToLibdns(zone, record)
 		if err != nil {
 			// Skip records that can't be parsed
 			// This allows the operation to continue even if some records are invalid
@@ -188,7 +206,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 			return nil, fmt.Errorf("failed to create record: %w", err)
 		}
 
-		libdnsRec, err := internalToLibdns(*createdRec)
+		libdnsRec, err := internalToLibdns(zone, *createdRec)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert created record: %w", err)
 		}
@@ -238,7 +256,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 			return nil, fmt.Errorf("failed to create record: %w", err)
 		}
 
-		libdnsRec, err := internalToLibdns(*createdRec)
+		libdnsRec, err := internalToLibdns(zone, *createdRec)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert created record: %w", err)
 		}
@@ -282,7 +300,7 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 					return nil, fmt.Errorf("failed to delete record %d: %w", existing.ID, err)
 				}
 
-				libdnsRec, err := internalToLibdns(existing)
+				libdnsRec, err := internalToLibdns(zone, existing)
 				if err != nil {
 					return nil, fmt.Errorf("failed to convert deleted record: %w", err)
 				}
@@ -304,7 +322,7 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 						return nil, fmt.Errorf("failed to delete record %d: %w", existing.ID, err)
 					}
 
-					libdnsRec, err := internalToLibdns(existing)
+					libdnsRec, err := internalToLibdns(zone, existing)
 					if err != nil {
 						return nil, fmt.Errorf("failed to convert deleted record: %w", err)
 					}

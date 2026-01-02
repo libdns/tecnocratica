@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,6 +192,7 @@ func TestLibdnsToInternal(t *testing.T) {
 func TestInternalToLibdns(t *testing.T) {
 	tests := []struct {
 		name      string
+		zone      string
 		record    Record
 		wantName  string
 		wantType  string
@@ -207,7 +209,7 @@ func TestInternalToLibdns(t *testing.T) {
 				Content: "192.0.2.1",
 				TTL:     3600,
 			},
-			wantName:  "www",
+			wantName:  "www.example.com.",
 			wantType:  "A",
 			wantValue: "192.0.2.1",
 			wantTTL:   3600 * time.Second,
@@ -222,7 +224,7 @@ func TestInternalToLibdns(t *testing.T) {
 				Content: "2001:db8::1",
 				TTL:     3600,
 			},
-			wantName:  "www",
+			wantName:  "www.example.com.",
 			wantType:  "AAAA",
 			wantValue: "2001:db8::1",
 			wantTTL:   3600 * time.Second,
@@ -237,7 +239,7 @@ func TestInternalToLibdns(t *testing.T) {
 				Content: "validation-token",
 				TTL:     300,
 			},
-			wantName:  "_acme-challenge",
+			wantName:  "_acme-challenge.example.com.",
 			wantType:  "TXT",
 			wantValue: "validation-token",
 			wantTTL:   300 * time.Second,
@@ -253,7 +255,7 @@ func TestInternalToLibdns(t *testing.T) {
 				TTL:      3600,
 				Priority: 10,
 			},
-			wantName:  "@",
+			wantName:  "example.com.",
 			wantType:  "MX",
 			wantValue: "10 mail.example.com",
 			wantTTL:   3600 * time.Second,
@@ -269,7 +271,7 @@ func TestInternalToLibdns(t *testing.T) {
 				TTL:      3600,
 				Priority: 10,
 			},
-			wantName:  "_sip._tcp",
+			wantName:  "_sip._tcp.example.com.",
 			wantType:  "SRV",
 			wantValue: "10 20 5060 sip.example.com",
 			wantTTL:   3600 * time.Second,
@@ -279,7 +281,11 @@ func TestInternalToLibdns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := internalToLibdns(tt.record)
+			zone := tt.zone
+			if zone == "" {
+				zone = "example.com."
+			}
+			result, err := internalToLibdns(zone, tt.record)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("internalToLibdns() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -755,8 +761,9 @@ func TestIntegration_AppendAndDelete(t *testing.T) {
 
 	// Check if our test record is in the list
 	found := false
+	expectedName := "_libdns-test." + strings.TrimSuffix(testDomain, ".") + "."
 	for _, r := range allRecords {
-		if r.RR().Name == "_libdns-test" && r.RR().Type == "TXT" && r.RR().Data == "integration-test-record" {
+		if r.RR().Name == expectedName && r.RR().Type == "TXT" && r.RR().Data == "integration-test-record" {
 			found = true
 			break
 		}
@@ -852,8 +859,9 @@ func TestIntegration_SetRecords(t *testing.T) {
 
 	// Check if our updated record is in the list
 	found := false
+	expectedName := "_libdns-set-test." + strings.TrimSuffix(testDomain, ".") + "."
 	for _, r := range allRecords {
-		if r.RR().Name == "_libdns-set-test" && r.RR().Type == "TXT" {
+		if r.RR().Name == expectedName && r.RR().Type == "TXT" {
 			if r.RR().Data == "updated-value" {
 				found = true
 				t.Logf("Verified test record was updated with new value")
