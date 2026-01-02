@@ -99,6 +99,36 @@ func TestLibdnsToInternal(t *testing.T) {
 			wantPriority: 0,
 		},
 		{
+			name: "ACME challenge for subdomain with FQDN",
+			zone: "example.com.",
+			rr: libdns.RR{
+				Type: "TXT",
+				Name: "_acme-challenge.git.example.com.",
+				Data: "validation-token-12345",
+				TTL:  300 * time.Second,
+			},
+			wantName:     "_acme-challenge.git",
+			wantType:     "TXT",
+			wantData:     "validation-token-12345",
+			wantTTL:      300,
+			wantPriority: 0,
+		},
+		{
+			name: "ACME challenge for apex domain with FQDN",
+			zone: "example.com.",
+			rr: libdns.RR{
+				Type: "TXT",
+				Name: "_acme-challenge.example.com.",
+				Data: "validation-token-67890",
+				TTL:  300 * time.Second,
+			},
+			wantName:     "_acme-challenge",
+			wantType:     "TXT",
+			wantData:     "validation-token-67890",
+			wantTTL:      300,
+			wantPriority: 0,
+		},
+		{
 			name: "MX record",
 			zone: "example.com",
 			rr: libdns.RR{

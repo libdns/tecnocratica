@@ -49,11 +49,14 @@ func libdnsToInternal(zone string, rec libdns.Record) Record {
 	name := rr.Name
 
 	// Strip the zone suffix if present (FQDN to relative conversion)
-	zoneSuffix := "." + strings.TrimSuffix(zone, ".")
-	if strings.HasSuffix(name, zoneSuffix) {
-		name = strings.TrimSuffix(name, zoneSuffix)
-	} else if strings.HasSuffix(name, "."+strings.TrimSuffix(zone, ".")) {
-		name = strings.TrimSuffix(name, "."+strings.TrimSuffix(zone, "."))
+	// Normalize both name and zone by removing trailing dots for consistent matching
+	normalizedZone := strings.TrimSuffix(zone, ".")
+	normalizedName := strings.TrimSuffix(name, ".")
+	zoneSuffix := "." + normalizedZone
+
+	// Use CutSuffix for cleaner suffix removal
+	if after, found := strings.CutSuffix(normalizedName, zoneSuffix); found {
+		name = after
 	}
 
 	// Handle apex records
