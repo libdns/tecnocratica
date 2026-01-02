@@ -134,20 +134,27 @@ func internalToLibdns(zone string, rec Record) (libdns.Record, error) {
 	}
 
 	// Convert relative names to absolute (FQDN) by appending the zone
-	// The API returns relative names (e.g., "_acme-challenge.git" or "@")
-	// but libdns expects absolute names (e.g., "_acme-challenge.git.etaboada.com.")
-	if name != "" && name != "@" {
-		// Ensure zone has trailing dot
-		normalizedZone := strings.TrimSuffix(zone, ".")
-		// Build the FQDN: name.zone.
-		name = name + "." + normalizedZone + "."
-	} else {
-		// "@" represents the zone apex, so use the zone itself
+	// The API may return relative names (e.g., "_acme-challenge.git" or "@")
+	// or sometimes already-qualified names (e.g., "_acme-challenge.git.etaboada.com")
+	// libdns expects absolute names (e.g., "_acme-challenge.git.etaboada.com.")
+	normalizedZone := strings.TrimSuffix(zone, ".")
+
+	if name == "" || name == "@" {
+		// "@" or empty represents the zone apex, so use the zone itself
 		if !strings.HasSuffix(zone, ".") {
 			name = zone + "."
 		} else {
 			name = zone
 		}
+	} else if strings.HasSuffix(name, "."+normalizedZone) || strings.HasSuffix(name, "."+normalizedZone+".") {
+		// Name already contains the zone (API returned FQDN), just ensure trailing dot
+		name = strings.TrimSuffix(name, ".") + "."
+	} else if name == normalizedZone || name == normalizedZone+"." {
+		// Name is the zone itself (apex record with zone name)
+		name = normalizedZone + "."
+	} else {
+		// Name is relative, append the zone
+		name = name + "." + normalizedZone + "."
 	}
 
 	rr := libdns.RR{
