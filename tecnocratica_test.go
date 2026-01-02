@@ -707,7 +707,7 @@ func TestIntegration_AppendAndDelete(t *testing.T) {
 	testDomain := os.Getenv("NEODIGIT_DOMAIN")
 
 	if apiToken == "" || testDomain == "" {
-		t.Skip("Skipping integration test - set NEODIGIT_API_TOKEN and NEODIGIT_TEST_ZONE to run")
+		t.Skip("Skipping integration test - set NEODIGIT_TOKEN and NEODIGIT_DOMAIN to run")
 	}
 
 	p := &Provider{
