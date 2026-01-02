@@ -246,6 +246,21 @@ func TestInternalToLibdns(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name: "TXT record with quotes from API",
+			record: Record{
+				ID:      6,
+				Name:    "_acme-challenge",
+				Type:    "TXT",
+				Content: "\"validation-token-with-quotes\"",
+				TTL:     300,
+			},
+			wantName:  "_acme-challenge.example.com.",
+			wantType:  "TXT",
+			wantValue: "validation-token-with-quotes",
+			wantTTL:   300 * time.Second,
+			wantErr:   false,
+		},
+		{
 			name: "MX record",
 			record: Record{
 				ID:       4,
@@ -361,7 +376,7 @@ func TestProvider_GetZoneID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(tt.zones)
+				_ = json.NewEncoder(w).Encode(tt.zones)
 			}))
 			defer server.Close()
 
@@ -420,10 +435,10 @@ func TestProvider_GetRecords(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/dns/zones" {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.zones)
+					_ = json.NewEncoder(w).Encode(tt.zones)
 				} else {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.records)
+					_ = json.NewEncoder(w).Encode(tt.records)
 				}
 			}))
 			defer server.Close()
@@ -499,14 +514,14 @@ func TestProvider_AppendRecords(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/dns/zones" {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.zones)
+					_ = json.NewEncoder(w).Encode(tt.zones)
 				} else if r.Method == http.MethodPost {
 					var req RecordRequest
-					json.NewDecoder(r.Body).Decode(&req)
+					_ = json.NewDecoder(r.Body).Decode(&req)
 					req.Record.ID = recordID
 					recordID++
 					w.WriteHeader(http.StatusCreated)
-					json.NewEncoder(w).Encode(req.Record)
+					_ = json.NewEncoder(w).Encode(req.Record)
 				}
 			}))
 			defer server.Close()
@@ -573,19 +588,19 @@ func TestProvider_SetRecords(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/dns/zones" {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.zones)
+					_ = json.NewEncoder(w).Encode(tt.zones)
 				} else if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.existingRecords)
+					_ = json.NewEncoder(w).Encode(tt.existingRecords)
 				} else if r.Method == http.MethodDelete {
 					w.WriteHeader(http.StatusNoContent)
 				} else if r.Method == http.MethodPost {
 					var req RecordRequest
-					json.NewDecoder(r.Body).Decode(&req)
+					_ = json.NewDecoder(r.Body).Decode(&req)
 					req.Record.ID = recordID
 					recordID++
 					w.WriteHeader(http.StatusCreated)
-					json.NewEncoder(w).Encode(req.Record)
+					_ = json.NewEncoder(w).Encode(req.Record)
 				}
 			}))
 			defer server.Close()
@@ -652,10 +667,10 @@ func TestProvider_DeleteRecords(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/dns/zones" {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.zones)
+					_ = json.NewEncoder(w).Encode(tt.zones)
 				} else if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(tt.existingRecords)
+					_ = json.NewEncoder(w).Encode(tt.existingRecords)
 				} else if r.Method == http.MethodDelete {
 					w.WriteHeader(http.StatusNoContent)
 				}

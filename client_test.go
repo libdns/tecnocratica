@@ -123,7 +123,7 @@ func TestClient_GetZones(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.responseStatus)
-				json.NewEncoder(w).Encode(tt.responseBody)
+				_ = json.NewEncoder(w).Encode(tt.responseBody)
 			}))
 			defer server.Close()
 
@@ -206,7 +206,7 @@ func TestClient_GetRecords(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.responseStatus)
-				json.NewEncoder(w).Encode(tt.responseBody)
+				_ = json.NewEncoder(w).Encode(tt.responseBody)
 			}))
 			defer server.Close()
 
@@ -285,7 +285,7 @@ func TestClient_CreateRecord(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.responseStatus)
-				json.NewEncoder(w).Encode(tt.responseBody)
+				_ = json.NewEncoder(w).Encode(tt.responseBody)
 			}))
 			defer server.Close()
 

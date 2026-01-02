@@ -125,7 +125,7 @@ func (c *Client) do(req *http.Request, result any) error {
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("Unexpected http error: Request: %v, Error: %w", req.URL, err)
+		return fmt.Errorf("unexpected http error: request: %v, error: %w", req.URL, err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -133,7 +133,7 @@ func (c *Client) do(req *http.Request, result any) error {
 	if resp.StatusCode/100 != 2 {
 		raw, _ := io.ReadAll(resp.Body)
 
-		return fmt.Errorf("Unexpected status code: %d, Request: %v, Response: %s", resp.StatusCode, req.URL, raw)
+		return fmt.Errorf("unexpected status code: %d, request: %v, response: %s", resp.StatusCode, req.URL, raw)
 	}
 
 	if result == nil {
@@ -142,12 +142,12 @@ func (c *Client) do(req *http.Request, result any) error {
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("Error reading response: Status: %d, Request: %v, Error: %w", resp.StatusCode, req.URL, err)
+		return fmt.Errorf("error reading response: status: %d, request: %v, error: %w", resp.StatusCode, req.URL, err)
 	}
 
 	err = json.Unmarshal(raw, result)
 	if err != nil {
-		return fmt.Errorf("Error unmarshaling response: Status: %d, Request: %v, Response: %s, Error: %w", resp.StatusCode, req.URL, raw, err)
+		return fmt.Errorf("error unmarshaling response: status: %d, request: %v, response: %s, error: %w", resp.StatusCode, req.URL, raw, err)
 	}
 
 	return nil

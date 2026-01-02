@@ -73,18 +73,19 @@ func libdnsToInternal(zone string, rec libdns.Record) Record {
 		data = strings.Trim(data, "\"")
 	}
 
-	if rr.Type == "MX" {
+	switch rr.Type {
+	case "MX":
 		// MX format: "priority target"
 		parts := strings.Fields(rr.Data)
 		if len(parts) >= 2 {
-			fmt.Sscanf(parts[0], "%d", &priority)
+			_, _ = fmt.Sscanf(parts[0], "%d", &priority)
 			data = strings.Join(parts[1:], " ")
 		}
-	} else if rr.Type == "SRV" {
+	case "SRV":
 		// SRV format: "priority weight port target"
 		parts := strings.Fields(rr.Data)
 		if len(parts) >= 4 {
-			fmt.Sscanf(parts[0], "%d", &priority)
+			_, _ = fmt.Sscanf(parts[0], "%d", &priority)
 			// Keep weight, port, and target in the content
 			data = strings.Join(parts[1:], " ")
 		}
@@ -104,12 +105,19 @@ func libdnsToInternal(zone string, rec libdns.Record) Record {
 func internalToLibdns(zone string, rec Record) (libdns.Record, error) {
 	data := rec.Content
 
+	// For TXT records, strip quotes if the API returns them
+	// This ensures consistency with libdnsToInternal which also strips quotes
+	if rec.Type == "TXT" {
+		data = strings.Trim(data, "\"")
+	}
+
 	// For MX and SRV records, libdns expects the priority to be part of the Data field
 	// Format: "priority target" for MX, or "priority weight port target" for SRV
 	// The Neodigit API stores priority separately in the Priority field
-	if rec.Type == "MX" {
+	switch rec.Type {
+	case "MX":
 		data = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
-	} else if rec.Type == "SRV" {
+	case "SRV":
 		// SRV: API stores priority in Priority field, "weight port target" in Content
 		data = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
 	}
