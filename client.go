@@ -108,6 +108,27 @@ func (c *Client) createRecord(ctx context.Context, zoneID int, record Record) (*
 	return &result, nil
 }
 
+// UpdateRecord updates an existing DNS record.
+func (c *Client) updateRecord(ctx context.Context, zoneID, recordID int, record Record) (*Record, error) {
+	endpoint := c.BaseURL.JoinPath("dns", "zones", strconv.Itoa(zoneID), "records", strconv.Itoa(recordID))
+
+	payload := RecordRequest{Record: record}
+
+	req, err := doJSONRequest(ctx, http.MethodPut, endpoint, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var result Record
+
+	err = c.do(req, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 // DeleteRecord deletes a DNS record.
 func (c *Client) deleteRecord(ctx context.Context, zoneID, recordID int) error {
 	endpoint := c.BaseURL.JoinPath("dns", "zones", strconv.Itoa(zoneID), "records", strconv.Itoa(recordID))

@@ -233,7 +233,9 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 }
 
 // SetRecords sets the records in the zone, either by updating existing records or creating new ones.
-// It returns the updated records.
+// Per libdns spec: for any (name, type) pair in the input, SetRecords ensures that the only
+// records in the output zone with that (name, type) pair are those provided in the input.
+// It returns the records which were set.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	zoneID, err := p.getZoneID(ctx, zone)
 	if err != nil {
@@ -251,32 +253,58 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 		return nil, err
 	}
 
-	var setRecords []libdns.Record
+	// Group input records by (name, type)
+	type recordKey struct{ Name, Type string }
+	inputByKey := make(map[recordKey][]Record)
 	for _, record := range records {
 		internalRec := libdnsToInternal(zone, record)
+		key := recordKey{internalRec.Name, internalRec.Type}
+		inputByKey[key] = append(inputByKey[key], internalRec)
+	}
 
-		// Find and delete any existing records with the same name and type
+	var setRecords []libdns.Record
+
+	// Process each (name, type) group
+	for key, inputRecs := range inputByKey {
+		// Find all existing records with this (name, type)
+		var existingForKey []Record
 		for _, existing := range existingRecords {
-			if existing.Name == internalRec.Name && existing.Type == internalRec.Type {
-				err := client.deleteRecord(ctx, zoneID, existing.ID)
-				if err != nil {
-					return nil, fmt.Errorf("failed to delete existing record %d: %w", existing.ID, err)
-				}
+			if existing.Name == key.Name && existing.Type == key.Type {
+				existingForKey = append(existingForKey, existing)
 			}
 		}
 
-		// Create the new record
-		createdRec, err := client.createRecord(ctx, zoneID, internalRec)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create record: %w", err)
+		// Update/create input records, reusing existing record IDs where possible
+		for i, internalRec := range inputRecs {
+			var resultRec *Record
+			if i < len(existingForKey) {
+				// Update existing record
+				resultRec, err = client.updateRecord(ctx, zoneID, existingForKey[i].ID, internalRec)
+				if err != nil {
+					return nil, fmt.Errorf("failed to update record %d: %w", existingForKey[i].ID, err)
+				}
+			} else {
+				// Create new record
+				resultRec, err = client.createRecord(ctx, zoneID, internalRec)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create record: %w", err)
+				}
+			}
+
+			libdnsRec, err := internalToLibdns(zone, *resultRec)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert record: %w", err)
+			}
+			setRecords = append(setRecords, libdnsRec)
 		}
 
-		libdnsRec, err := internalToLibdns(zone, *createdRec)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert created record: %w", err)
+		// Delete extra existing records that exceed the input count
+		for i := len(inputRecs); i < len(existingForKey); i++ {
+			err := client.deleteRecord(ctx, zoneID, existingForKey[i].ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete extra record %d: %w", existingForKey[i].ID, err)
+			}
 		}
-
-		setRecords = append(setRecords, libdnsRec)
 	}
 
 	return setRecords, nil

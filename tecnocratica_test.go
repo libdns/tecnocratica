@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -612,6 +613,7 @@ func TestProvider_SetRecords(t *testing.T) {
 		newRecords      []libdns.Record
 		wantErr         bool
 		wantCount       int
+		wantDeletes     int // expected number of delete calls
 	}{
 		{
 			name:     "set replaces existing record",
@@ -625,14 +627,66 @@ func TestProvider_SetRecords(t *testing.T) {
 			newRecords: []libdns.Record{
 				makeRecord("www", "A", "192.0.2.100", 7200*time.Second),
 			},
-			wantErr:   false,
-			wantCount: 1,
+			wantErr:     false,
+			wantCount:   1,
+			wantDeletes: 0,
+		},
+		{
+			name:     "set deletes extra existing records",
+			zoneName: "example.com",
+			zones: []Zone{
+				{ID: 1, Name: "example.com"},
+			},
+			existingRecords: []Record{
+				{ID: 1, Name: "www", Type: "A", Content: "192.0.2.1", TTL: 3600},
+				{ID: 2, Name: "www", Type: "A", Content: "192.0.2.2", TTL: 3600},
+				{ID: 3, Name: "www", Type: "A", Content: "192.0.2.3", TTL: 3600},
+			},
+			newRecords: []libdns.Record{
+				makeRecord("www", "A", "192.0.2.100", 7200*time.Second),
+			},
+			wantErr:     false,
+			wantCount:   1,
+			wantDeletes: 2, // should delete 2 extra records
+		},
+		{
+			name:     "set creates new records when fewer exist",
+			zoneName: "example.com",
+			zones: []Zone{
+				{ID: 1, Name: "example.com"},
+			},
+			existingRecords: []Record{
+				{ID: 1, Name: "www", Type: "A", Content: "192.0.2.1", TTL: 3600},
+			},
+			newRecords: []libdns.Record{
+				makeRecord("www", "A", "192.0.2.100", 7200*time.Second),
+				makeRecord("www", "A", "192.0.2.101", 7200*time.Second),
+				makeRecord("www", "A", "192.0.2.102", 7200*time.Second),
+			},
+			wantErr:     false,
+			wantCount:   3,
+			wantDeletes: 0,
+		},
+		{
+			name:     "set creates record when none exist",
+			zoneName: "example.com",
+			zones: []Zone{
+				{ID: 1, Name: "example.com"},
+			},
+			existingRecords: []Record{},
+			newRecords: []libdns.Record{
+				makeRecord("www", "A", "192.0.2.100", 7200*time.Second),
+			},
+			wantErr:     false,
+			wantCount:   1,
+			wantDeletes: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recordID := 100
+			deleteCount := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/dns/zones" {
 					w.WriteHeader(http.StatusOK)
@@ -641,7 +695,20 @@ func TestProvider_SetRecords(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 					_ = json.NewEncoder(w).Encode(tt.existingRecords)
 				} else if r.Method == http.MethodDelete {
+					deleteCount++
 					w.WriteHeader(http.StatusNoContent)
+				} else if r.Method == http.MethodPut {
+					// Handle update - extract record ID from path and return updated record
+					var req RecordRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					// Extract record ID from path (e.g., /dns/zones/1/records/1)
+					parts := strings.Split(r.URL.Path, "/")
+					if len(parts) >= 5 {
+						id, _ := strconv.Atoi(parts[len(parts)-1])
+						req.Record.ID = id
+					}
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(req.Record)
 				} else if r.Method == http.MethodPost {
 					var req RecordRequest
 					_ = json.NewDecoder(r.Body).Decode(&req)
@@ -666,6 +733,10 @@ func TestProvider_SetRecords(t *testing.T) {
 
 			if !tt.wantErr && len(records) != tt.wantCount {
 				t.Errorf("SetRecords() returned %d records, want %d", len(records), tt.wantCount)
+			}
+
+			if deleteCount != tt.wantDeletes {
+				t.Errorf("SetRecords() made %d delete calls, want %d", deleteCount, tt.wantDeletes)
 			}
 		})
 	}
